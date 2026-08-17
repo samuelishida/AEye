@@ -62,3 +62,17 @@ def test_chain_pode_incluir_claude_code(monkeypatch: pytest.MonkeyPatch) -> None
     chain = build_chain("gemini,claudecode")
     assert [n for n, _ in chain] == ["gemini", "claudecode"]
     assert isinstance(chain[1][1], ClaudeCodeClient)
+
+
+
+def test_build_chain_warns_when_pulando_sem_chave(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.CaptureFixture[str]
+) -> None:
+    """Pular provedor sem chave deve gerar um aviso de diagnóstico."""
+    import logging
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    with caplog.at_level(logging.WARNING, logger="aeye.llm"):
+        chain = build_chain("gemini,cerebras")
+    assert [n for n, _ in chain] == ["gemini"]
+    assert any("sem chave" in r.message.lower() for r in caplog.records)

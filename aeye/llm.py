@@ -13,7 +13,10 @@ import os
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Sequence
+
+import logging
 
 from dotenv import load_dotenv
 
@@ -410,7 +413,7 @@ def default_providers() -> dict[str, Any]:
 def build_chain(chain: str | None = None) -> list[tuple[str, LLMClient]]:
     """Constrói a lista ordenada [(nome, cliente)] a partir de AI_FALLBACK_CHAIN.
 
-    Provedores sem chave são pulados silenciosamente (ex.: só GEMINI_API_KEY
+    Provedores sem chave são pulados com um aviso (ex.: só GEMINI_API_KEY
     configurada usa apenas Gemini).
     """
     order = (chain or os.getenv("AI_FALLBACK_CHAIN", "gemini,cerebras")).split(",")
@@ -423,7 +426,7 @@ def build_chain(chain: str | None = None) -> list[tuple[str, LLMClient]]:
         try:
             built.append((name, providers[name]()))
         except LLMError:
-            continue  # sem chave -> pula
+            logging.warning("Pulando %s: sem chave configurada", name)  # sem chave -> pula
     if not built:
         raise LLMError("Nenhum provedor de LLM configurado. Crie o .env (veja .env.example).")
     return built

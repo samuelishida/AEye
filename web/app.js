@@ -34,6 +34,7 @@ function setImage(file) {
     $("previewWrap").hidden = false;
   };
   reader.readAsDataURL(file);
+  announce("Imagem carregada. Pronta para processar.");
 }
 
 $("imageInput").addEventListener("change", (e) => {
@@ -108,7 +109,7 @@ function initPasteHandler() {
 }
 
 /* ---------- helpers ---------- */
-function addMsg(role, text, meta) {
+function addMsg(role, text, meta, retry) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
   div.textContent = text;
@@ -117,6 +118,9 @@ function addMsg(role, text, meta) {
     m.className = "meta";
     m.textContent = meta;
     div.appendChild(m);
+  }
+  if (role === "assistant") {
+    _attachResultControls(div, text, retry);
   }
   historyEl.prepend(div);
 }
@@ -161,63 +165,165 @@ function speak(text) {
   }
 }
 
+/* ---------- avisos de estado: região ARIA (#status) + voz opcional ---------- */
+function announce(message) {
+  statusEl.textContent = message;   // atualiza a região ARIA live (role="status")
+  speak(message);                    // lê em voz alta se o toggle "Ler em voz alta" estiver ativo
+}
+
+/* ---------- controles por resultado: reouvir / copiar / reenviar ---------- */
+function _attachResultControls(msgEl, text, retry) {
+  const row = document.createElement("div");
+  row.className = "result-controls";
+
+  function ctl(label, ariaLabel, onClick) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "result-ctl ghost";
+    b.setAttribute("aria-label", ariaLabel);
+    b.textContent = label;
+    b.addEventListener("click", () => onClick(b));
+    row.appendChild(b);
+  }
+
+  ctl("🗣️ Reouvir", "Ouvir a resposta novamente", (b) => {
+    b.disabled = true;
+    statusEl.textContent = "Lendo a resposta em voz alta...";
+    postJSON("/api/read", { text }).then(() => {
+      statusEl.textContent = "Resposta lida em voz alta.";
+    }).catch(() => {
+      statusEl.textContent = "Não foi possível ler em voz alta agora.";
+    }).finally(() => {
+      b.disabled = false;
+    });
+  });
+
+  ctl("📋 Copiar", "Copiar a resposta para a área de transferência", () => {
+    const done = () => { statusEl.textContent = "Resposta copiada para a área de transferência."; };
+    const fail = () => { statusEl.textContent = "Não foi possível copiar. Selecione o texto manualmente."; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(fail);
+    } else {
+      fail();
+    }
+  });
+
+  if (retry) {
+    ctl("↻ Reenviar", "Reenviar esta solicitação", (b) => {
+      b.disabled = true;
+      if (retry.kind === "ocr") runOcrFlow(retry);
+      else if (retry.kind === "chat") runChatFlow(retry.message);
+      else if (retry.kind === "act") runActFlow(retry.command);
+      else b.disabled = false;
+    });
+  }
+
+  msgEl.appendChild(row);
+}
+
 /* ---------- processar imagem ou texto ---------- */
-$("processBtn").addEventListener("click", async () => {
+async function runOcrFlow({ file, m, instruction, strong }) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("mode", m);
+  fd.append("instruction", instruction);
+  fd.append("strong", strong ? "true" : "false");
+  const res = await authedFetch("/api/ocr", { method: "POST", body: fd }, 600000);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Erro ${res.status}`);
+  return data;
+}
+
+async function runChatFlow(message) {
+  return postJSON("/api/chat", { message });
+}
+
+async function runActFlow(command) {
+  const data = await postJSON("/api/act", { command, approved: false });
+  pendingAction = data.action;
+  $("approvalText").textContent = _approvalText(pendingAction);
+  $("approval").hidden = false;
+  $("approveBtn").focus();
+  announce("Ação aguardando aprovação. Leia a descrição e confirme.");
+}
+
+function _approvalText(action) {
+  const params = action.params && Object.keys(action.params).length
+    ? Object.entries(action.params)
+        .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`)
+        .join(", ")
+    : "(sem parâmetros)";
+  const lines = [];
+  if (action.description) {
+    lines.push(`O computador vai: ${action.description}`);
+  } else {
+    lines.push(`O computador vai usar a ferramenta "${action.tool}".`);
+  }
+  lines.push(`Parâmetros: ${params}`);
+  if (action.rationale) lines.push(`Motivo: ${action.rationale}`);
+  return lines.join("\n");
+}
+
+function _abortMessage() {
+  return "Ainda processando... a resposta demorou demais. Tente de novo (ou use uma imagem menor).";
+}
+
+$("processBtn").addEventListener("click", () => _processFromInputs(false));
+
+async function _processFromInputs(isRetry) {
   const instruction = $("promptInput").value.trim();
-  statusEl.textContent = "Processando...";
+  if (!isRetry && !selectedImage && !instruction) {
+    statusEl.textContent = "Envie uma imagem ou digite uma mensagem.";
+    return;
+  }
   $("processBtn").disabled = true;
+  statusEl.textContent = "Processando...";
   try {
     if (selectedImage) {
-      const fd = new FormData();
-      fd.append("file", selectedImage);
-      fd.append("mode", mode);
-      fd.append("instruction", instruction);
-      fd.append("strong", $("strongToggle").checked ? "true" : "false");
-      const res = await authedFetch("/api/ocr", { method: "POST", body: fd }, 600000);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || `Erro ${res.status}`);
+      const data = await runOcrFlow({
+        file: selectedImage,
+        m: mode,
+        instruction,
+        strong: $("strongToggle").checked,
+      });
       addMsg("assistant", data.text,
-        `via ${data.provider} · origem: ${data.source}${data.warning ? " · ⚠ " + data.warning : ""}`);
+        `via ${data.provider} · origem: ${data.source}${data.warning ? " · ⚠ " + data.warning : ""}`,
+        { kind: "ocr", file: selectedImage, m: mode, instruction, strong: $("strongToggle").checked });
       speak(data.text);
-      statusEl.textContent = "";
     } else if (instruction) {
-      const data = await postJSON("/api/chat", { message: instruction });
-      addMsg("assistant", data.text, `via ${data.provider}${data.escalated ? " (fallback)" : ""}`);
+      const data = await runChatFlow(instruction);
+      addMsg("assistant", data.text, `via ${data.provider}${data.escalated ? " (fallback)" : ""}`,
+        { kind: "chat", message: instruction });
       speak(data.text);
-      statusEl.textContent = "";
     } else {
       statusEl.textContent = "Envie uma imagem ou digite uma mensagem.";
     }
+    announce("Processamento concluído. A resposta está no histórico.");
   } catch (err) {
-    statusEl.textContent = err.name === "AbortError"
-      ? "Ainda processando... a resposta demorou demais. Tente de novo (ou use uma imagem menor)."
-      : "Erro: " + err.message;
+    announce(err.name === "AbortError" ? _abortMessage() : "Erro ao processar: " + err.message);
   } finally {
     $("processBtn").disabled = false;
   }
-});
+}
 
 /* ---------- controle do computador ---------- */
-$("actBtn").addEventListener("click", async () => {
+$("actBtn").addEventListener("click", () => {
   const command = $("actionInput").value.trim();
   if (!command) return;
-  statusEl.textContent = "Interpretando comando...";
+  _runAct(command);
+});
+
+async function _runAct(command) {
   $("actBtn").disabled = true;
+  statusEl.textContent = "Interpretando comando...";
   try {
-    const data = await postJSON("/api/act", { command, approved: false });
-    pendingAction = data.action;
-    $("approvalText").textContent =
-      `Ferramenta: ${pendingAction.tool}\nParâmetros: ${JSON.stringify(pendingAction.params)}\n` +
-      (pendingAction.rationale ? `Motivo: ${pendingAction.rationale}` : "");
-    $("approval").hidden = false;
-    $("approveBtn").focus();
-    statusEl.textContent = "";
+    await runActFlow(command);   // anuncia "Ação aguardando aprovação" ao final
   } catch (err) {
-    statusEl.textContent = "Erro: " + err.message;
+    announce("Erro ao interpretar o comando: " + err.message);
   } finally {
     $("actBtn").disabled = false;
   }
-});
+}
 
 $("approveBtn").addEventListener("click", async () => {
   const command = $("actionInput").value.trim();
@@ -226,17 +332,20 @@ $("approveBtn").addEventListener("click", async () => {
   try {
     const data = await postJSON("/api/act", { command, approved: true, action: pendingAction });
     if (data.status === "cancelled") {
-      addMsg("assistant", "⏹️ Ação cancelada (kill switch).", JSON.stringify(data.action));
-      statusEl.textContent = "Ação cancelada.";
+      addMsg("assistant", "⏹️ Ação cancelada (kill switch).",
+        `ferramenta: ${data.action ? data.action.tool : "?"}`,
+        { kind: "act", command });
+      announce("Ação cancelada pelo kill switch.");
     } else {
-      addMsg("assistant", "✅ Ação executada:\n" + (data.result || "ok"), JSON.stringify(data.action));
-      speak("Ação executada.");
-      statusEl.textContent = "";
+      addMsg("assistant", "✅ Ação executada:\n" + (data.result || "ok"),
+        `ferramenta: ${data.action ? data.action.tool : "?"}`,
+        { kind: "act", command });
+      announce("Ação executada com sucesso.");
     }
     $("approval").hidden = true;
     pendingAction = null;
   } catch (err) {
-    statusEl.textContent = "Erro: " + err.message;
+    announce("Erro ao executar a ação: " + err.message);
   } finally {
     $("approveBtn").disabled = false;
   }
@@ -245,10 +354,146 @@ $("approveBtn").addEventListener("click", async () => {
 $("rejectBtn").addEventListener("click", () => {
   pendingAction = null;
   $("approval").hidden = true;
-  statusEl.textContent = "Ação cancelada.";
+  announce("Ação cancelada pelo usuário.");
   postJSON("/api/cancel", {}).catch(() => {});
 });
+
+/* ---------- entrada por voz (Web Speech API) ---------- */
+let recognition = null;            // instância única do SpeechRecognition
+let currentVoiceField = null;      // id do campo que está sendo ditado
+
+const VOICE_LABELS = {
+  micPromptBtn: "Usar microfone para ditar texto",
+  micActionBtn: "Usar microfone para ditar comando",
+};
+
+function _voiceBtn(fieldId) {
+  return fieldId === "micPromptBtn" ? $("micPromptBtn") : $("micActionBtn");
+}
+
+function initVoiceInput() {
+  const micPrompt = $("micPromptBtn");
+  const micAction = $("micActionBtn");
+  if (!micPrompt && !micAction) return;
+
+  /* Verifica suporte: se não existir, os botões permanecem como dica visual. */
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    // degrade gracefully: avisa apenas se o usuário tentar ativar
+    [micPrompt, micAction].forEach((btn) => {
+      if (btn) btn.addEventListener("click", () => {
+        statusEl.textContent = "A Web Speech API não está disponível neste navegador. Use Ctrl+V para colar ou digite o texto.";
+      });
+    });
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = "pt-BR";
+  recognition.interimResults = true;       // mostra resultados parciais enquanto fala
+  recognition.maxAlternatives = 1;         // menos ruído na inserção
+
+  /* Botão é toggle: clicar inicia a gravação; clicar de novo para. */
+  function _startRecognition(fieldId) {
+    if (currentVoiceField !== fieldId) {
+      _stopRecognition(true);             // cancela gravação anterior, se houver
+    }
+    currentVoiceField = fieldId;
+    const btn = _voiceBtn(fieldId);
+    try {
+      recognition.start();                // alguns navegadores lançam em vez de resolver com Promise
+    } catch (err) {
+      announce("Não foi possível iniciar a entrada por voz. Verifique a permissão do microfone.");
+      _stopRecognition(true);
+      return;
+    }
+    if (btn) {
+      btn.classList.add("recording");
+      btn.setAttribute("aria-label", "Parar gravação");
+    }
+    announce("Ouvindo, fale agora. Clique de novo para parar.");
+  }
+
+  function _stopRecognition(silent) {
+    const fieldId = currentVoiceField;
+    currentVoiceField = null;
+    if (recognition) {
+      try {
+        recognition.stop();               // para a gravação em andamento
+      } catch (_) { /* sessão já encerrada */ }
+    }
+    if (fieldId) {
+      const btn = _voiceBtn(fieldId);
+      if (btn) {
+        btn.classList.remove("recording");
+        btn.setAttribute("aria-label", VOICE_LABELS[fieldId]);
+      }
+    }
+    if (!silent) {
+      announce("Entrada por voz encerrada.");
+    }
+  }
+
+  recognition.onresult = (event) => {
+    const fieldId = currentVoiceField;
+    if (!fieldId) return;
+    const textarea = document.getElementById(fieldId === "micPromptBtn" ? "promptInput" : "actionInput");
+    if (!textarea) return;
+
+    let transcript = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    // Insere o texto ditado na posição do cursor, sem apagar o que já foi digitado.
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || 0;
+    const before = textarea.value.substring(0, start);
+    const after = textarea.value.substring(end);
+    const insert = transcript.trim();
+    if (insert) {
+      // normaliza espaços: garante uma única separação entre o texto existente e o ditado
+      const sep = (before.length && !/\s$/.test(before)) ? " " : "";
+      textarea.value = before + sep + insert + after;
+      // move o cursor para o final do texto inserido
+      const newCursorPos = start + sep.length + insert.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }
+  };
+
+  recognition.onend = () => {
+    const wasActive = currentVoiceField !== null;
+    _stopRecognition(!wasActive);  // se onerror já encerrou, não sobrescreve a mensagem
+  };
+  recognition.onerror = (event) => {
+    _stopRecognition(true);        // reseta o estado sem apagar a mensagem de erro
+    announce("Erro na entrada por voz: " + event.error + ".");
+  };
+
+  if (micPrompt) micPrompt.addEventListener("click", () => {
+    if (currentVoiceField === "micPromptBtn") {
+      _stopRecognition();                 // toggle: para a gravação em curso
+    } else {
+      _startRecognition("micPromptBtn");
+    }
+  });
+  if (micAction) micAction.addEventListener("click", () => {
+    if (currentVoiceField === "micActionBtn") {
+      _stopRecognition();
+    } else {
+      _startRecognition("micActionBtn");
+    }
+  });
+
+  // Garante que a gravação pare se o usuário mudar de campo ou clicar em outro botão.
+  document.getElementById("promptInput").addEventListener("focus", () => {
+    if (currentVoiceField === "micActionBtn") _stopRecognition();
+  });
+  document.getElementById("actionInput").addEventListener("focus", () => {
+    if (currentVoiceField === "micPromptBtn") _stopRecognition();
+  });
+}
 
 initDragDrop();
 initPasteButton();
 initPasteHandler();
+initVoiceInput();

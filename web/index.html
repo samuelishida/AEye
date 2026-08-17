@@ -50,8 +50,11 @@
     <!-- Instrução / conversa -->
     <section class="card">
       <h2>3. Instrução ou pergunta</h2>
-      <textarea id="promptInput" rows="2"
-        placeholder="Ex.: Formate e resuma. — ou a pergunta sobre a imagem. (Use o microfone do teclado do celular para falar.)"></textarea>
+      <div class="input-row">
+        <textarea id="promptInput" rows="2"
+          placeholder="Ex.: Formate e resuma. — ou a pergunta sobre a imagem. (Use o microfone do teclado do celular para falar.)"></textarea>
+        <button id="micPromptBtn" type="button" class="ghost mic-btn" aria-label="Usar microfone para ditar texto">🎙️</button>
+      </div>
       <div class="row">
         <label class="toggle"><input type="checkbox" id="speakToggle" /> 🔊 Ler em voz alta</label>
         <label class="toggle"><input type="checkbox" id="strongToggle" /> ⭐ Usar modelo forte</label>
@@ -64,7 +67,10 @@
     <section class="card">
       <h2>4. Controlar o computador por voz</h2>
       <p class="hint">Ex.: "abre o Word e digita olá", "clica no botão OK", "rola a página".</p>
-      <textarea id="actionInput" rows="2" placeholder="Digite (ou fale) o comando..."></textarea>
+      <div class="input-row">
+        <textarea id="actionInput" rows="2" placeholder="Digite (ou fale) o comando..."></textarea>
+        <button id="micActionBtn" type="button" class="ghost mic-btn" aria-label="Usar microfone para ditar comando">🎙️</button>
+      </div>
       <button id="actBtn" class="primary" type="button">Executar com aprovação ▶</button>
       <div id="approval" hidden>
         <p id="approvalText"></p>

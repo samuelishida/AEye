@@ -98,6 +98,24 @@ textarea {
 .msg .meta { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
 .msg .warn { display: block; font-size: 0.8rem; color: #fbbf24; margin-top: 6px; }
 
+/* controles por resultado: reouvir / copiar / reenviar */
+.result-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.result-ctl {
+  min-height: 44px; /* alvo de toque adequado */
+  min-width: 44px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 10px;
+  touch-action: manipulation;
+}
+.result-ctl:disabled { opacity: 0.55; cursor: wait; }
+
 #previewWrap { margin-top: 10px; }
 #preview { max-width: 100%; max-height: 260px; border-radius: 10px; display: block; margin-bottom: 8px; }
 
@@ -132,9 +150,50 @@ textarea {
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
+select:focus-visible,
+.image-card:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
 }
 
 footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 8px 16px 24px; }
+
+/* linha de entrada com botão de microfone ao lado do textarea */
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.input-row textarea {
+  flex: 1;
+  min-width: 0; /* evita estouro em containers flex */
+}
+
+.mic-btn {
+  /* botão redondo, compacto, ao lado do campo de texto */
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  touch-action: manipulation;
+}
+
+/* feedback visual de gravação ativa */
+.mic-btn.recording {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+  animation: pulse-record 1.2s infinite;
+}
+
+@keyframes pulse-record {
+  0% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+}
