@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>AEye — Assistente de Acessibilidade</title>
+  <link rel="stylesheet" href="/web/style.css" />
+</head>
+<body>
+  <header>
+    <h1>AEye</h1>
+    <p class="subtitle">Assistente de acessibilidade — OCR gratuito + IA na nuvem</p>
+  </header>
+
+  <main>
+    <!-- Histórico -->
+    <section id="history" aria-live="polite"></section>
+
+    <!-- Imagem -->
+    <section class="card image-card" tabindex="0" role="group"
+      aria-label="Área de imagem: arraste ou cole uma foto aqui">
+      <h2>1. Foto ou captura de tela</h2>
+      <label class="btn-file">
+        Escolher imagem / câmera
+        <input type="file" id="imageInput" accept="image/*" capture="environment" />
+      </label>
+      <div id="previewWrap" hidden>
+        <img id="preview" alt="Prévia da imagem enviada" />
+        <button id="clearImage" class="ghost" type="button">Remover imagem</button>
+        <button id="pasteBtn" class="ghost" type="button" title="Colar uma imagem do clipboard (Ctrl+V)">
+          Colar da área de transferência
+        </button>
+      </div>
+    </section>
+
+    <!-- Modo -->
+    <section class="card">
+      <h2>2. O que fazer com a imagem?</h2>
+      <div class="segmented" role="radiogroup" aria-label="Modo de processamento">
+        <button class="seg active" data-mode="texto" role="radio" aria-checked="true"
+          aria-label="Texto impresso">📄 Texto</button>
+        <button class="seg" data-mode="manuscrito" role="radio" aria-checked="false"
+          aria-label="Manuscrito">✍️ Manuscrito</button>
+        <button class="seg" data-mode="perguntar" role="radio" aria-checked="false"
+          aria-label="Perguntar sobre a imagem">❓ Perguntar</button>
+      </div>
+    </section>
+
+    <!-- Instrução / conversa -->
+    <section class="card">
+      <h2>3. Instrução ou pergunta</h2>
+      <textarea id="promptInput" rows="2"
+        placeholder="Ex.: Formate e resuma. — ou a pergunta sobre a imagem. (Use o microfone do teclado do celular para falar.)"></textarea>
+      <div class="row">
+        <label class="toggle"><input type="checkbox" id="speakToggle" /> 🔊 Ler em voz alta</label>
+        <label class="toggle"><input type="checkbox" id="strongToggle" /> ⭐ Usar modelo forte</label>
+      </div>
+      <button id="processBtn" class="primary" type="button">Processar ▶</button>
+      <p id="status" role="status"></p>
+    </section>
+
+    <!-- Controle do computador -->
+    <section class="card">
+      <h2>4. Controlar o computador por voz</h2>
+      <p class="hint">Ex.: "abre o Word e digita olá", "clica no botão OK", "rola a página".</p>
+      <textarea id="actionInput" rows="2" placeholder="Digite (ou fale) o comando..."></textarea>
+      <button id="actBtn" class="primary" type="button">Executar com aprovação ▶</button>
+      <div id="approval" hidden>
+        <p id="approvalText"></p>
+        <div class="row">
+          <button id="approveBtn" class="danger" type="button">✅ Aprovar e executar</button>
+          <button id="rejectBtn" class="ghost" type="button">Cancelar</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Funciona só na sua rede Wi-Fi. Custo: US$ 0 (Gemini free + Cerebras free + OCR local).</p>
+  </footer>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>

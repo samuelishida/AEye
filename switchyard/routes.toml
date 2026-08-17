@@ -1,0 +1,66 @@
+# AEye — configuração do NVIDIA NeMo Switchyard (proxy opcional)
+#
+# Uso (no PC do amigo, após compilar o servidor):
+#   export GEMINI_API_KEY=...          # ou definir no ambiente do Windows
+#   export CEREBRAS_API_KEY=...
+#   switchyard-server --config routes.toml --dry-run
+#   switchyard-server --config routes.toml --host 127.0.0.1 --port 4000
+#
+# O backend do AEye pode usar o modo switchyard apontando para:
+#   base_url = http://127.0.0.1:4000/v1  e  model = "aeye"
+#
+# Obs.: o juiz do llm_classifier custa uma chamada extra por requisição; o
+# "modo direto" do AEye (escalada embutida em Python) é o padrão recomendado.
+
+schema_version = 1
+
+# --- Clientes (provedores) ---
+[llm_clients.gemini]
+format = "openai_chat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+api_key_env = "GEMINI_API_KEY"
+
+[llm_clients.cerebras]
+format = "openai_chat"
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+
+[llm_clients.anthropic]
+format = "anthropic_messages"
+api_key_env = "ANTHROPIC_API_KEY"   # opcional — só com chave PRÓPRIA da Anthropic
+                                     # (a Anthropic não suporta terceiros). O "modelo
+                                     # forte" do AEye usa o Claude Code LOCAL (CLI),
+                                     # que não é alcançável via proxy HTTP.
+
+[llm_clients.ollama]
+format = "openai_chat"
+base_url = "http://localhost:11434/v1"
+
+# --- Alvos (modelos) ---
+[targets.weak]
+id = "gemini-2.5-flash"
+llm_client = "gemini"
+
+[targets.strong]
+id = "claude-sonnet-4-5"
+llm_client = "anthropic"            # OPCIONAL — se NÃO houver chave PRÓPRIA da Anthropic,
+                                     # remova este alvo E o [llm_clients.anthropic] acima,
+                                     # senão o --dry-run acusa chave ausente.
+
+[targets.local_ocr]
+id = "glm-ocr"
+llm_client = "ollama"
+
+[targets.classifier]
+id = "gemini-2.5-flash"
+llm_client = "gemini"
+
+# --- Rota ---
+[routes.aeye]
+id = "aeye"
+type = "llm_classifier"
+mode = "capability"
+classifier_target = "classifier"
+strong_target = "strong"
+weak_target = "weak"
+base_threshold = 0.5

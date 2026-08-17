@@ -1,0 +1,14 @@
+# AEye — dependências (Python 3.10–3.12, Windows x64)
+fastapi>=0.115
+uvicorn>=0.30
+rapidocr-onnxruntime>=1.4        # OCR clássico local (CPU)
+pillow>=10
+pillow-heif>=0.16                # fotos HEIC do iPhone
+numpy>=1.26
+openai>=1.40                     # Cerebras / Ollama / OpenRouter (OpenAI-compatível)
+google-genai>=0.4                # Gemini (principal)
+python-dotenv>=1.0
+mcp>=1.0                         # controle do computador (computer-control-mcp-server)
+anthropic>=0.40                  # opcional — modelo forte (pago)
+pyttsx3>=2.90                    # opcional — ler em voz alta no PC
+pytest>=8                        # desenvolvimento/testes
