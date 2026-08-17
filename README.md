@@ -174,26 +174,6 @@ permita. Sem isso o celular não consegue abrir a página.
 
 ---
 
-## (Opcional) NVIDIA NeMo Switchyard
-
-O Switchyard é um proxy em Rust que roteia chamadas de API entre provedores
-(OpenAI, Anthropic, Ollama...). O AEye já funciona sem ele (modo direto);
-o Switchyard serve para quem usa **Claude Code/API** no PC.
-
-No Windows é preciso compilar (instalar Rust + Visual Studio Build Tools):
-```
-cargo install --locked switchyard-server
-cd C:\AEye\switchyard
-set GEMINI_API_KEY=...
-set CEREBRAS_API_KEY=...
-switchyard-server --config routes.toml --dry-run
-switchyard-server --config routes.toml --host 127.0.0.1 --port 4000
-```
-Teste: `curl http://localhost:4000/health`. A configuração `routes.toml` usa o
-schema oficial do projeto (verificado contra a documentação do NVIDIA-NeMo).
-
----
-
 ## Testes (para quem desenvolve)
 
 ```
@@ -220,7 +200,6 @@ AEye/
 │   ├── killswitch.py         # segurar Esc cancela a ação em andamento
 │   └── tts.py                # ler em voz alta (Windows SAPI)
 ├── web/                      # interface (celular/PC)
-├── switchyard/routes.toml    # config do Switchyard (opcional)
 ├── tests/                    # testes com mocks (35 testes)
 ├── .env.example              # modelo das chaves
 └── requirements.txt
