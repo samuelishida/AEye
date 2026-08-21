@@ -9,14 +9,12 @@ Qualquer provedor OpenAI-compatível pode ser adicionado à cadeia trocando
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from abc import ABC, abstractmethod
 from typing import Any, Sequence
-
-import logging
 
 from dotenv import load_dotenv
 
@@ -367,6 +365,22 @@ class AnthropicClient(LLMClient):
 # --------------------------------------------------------------------------- #
 # Fábrica da cadeia
 # --------------------------------------------------------------------------- #
+def _ollama_client(
+    name: str,
+    url_env: str,
+    default_url: str,
+    model_env: str,
+    default_model: str,
+) -> OpenAICompatClient:
+    """Constrói um cliente OpenAI-compat apontando para um servidor Ollama local."""
+    return OpenAICompatClient(
+        name=name,
+        base_url=os.getenv(url_env, default_url) + "/v1",
+        api_key="ollama",
+        model=os.getenv(model_env, default_model),
+    )
+
+
 def default_providers() -> dict[str, Any]:
     """Provedores disponíveis. Cada entrada é um callable que devolve um LLMClient.
 
@@ -399,12 +413,21 @@ def default_providers() -> dict[str, Any]:
             api_key_env="OPENROUTER_API_KEY",
             model=os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
         ),
-        "ollama": lambda: OpenAICompatClient(
-            name="ollama",
-            base_url=os.getenv("OLLAMA_URL", "http://localhost:11434") + "/v1",
-            api_key="ollama",
-            model=os.getenv("OLLAMA_MODEL_TEXT", "qwen3:4b"),
+        # Ollama de texto offline (chat/OCR) — servidor VLM na porta 11435.
+        "ollama": lambda: _ollama_client(
+            "ollama", "OLLAMA_URL", "http://localhost:11435", "OLLAMA_MODEL_TEXT", "qwen3:4b"
         ),
+        # Orquestrador local principal (MiniCPM via Ollama). Entra na cadeia do
+        # /api/act via AEYE_ORCH_CHAIN; NÃO muda AI_FALLBACK_CHAIN (chat/OCR).
+        # Roda num servidor Ollama próprio (OLLAMA_URL_ORCH, porta 11434 por
+        # padrão) para não competir por memória com o servidor de OCR/VLM (11435).
+        "minicpm": lambda: _ollama_client(
+            "minicpm", "OLLAMA_URL_ORCH", "http://localhost:11434",
+            "AEYE_ORCH_MODEL", "jewelzufo/MiniCPM5-1B:latest",
+        ),
+        # API Anthropic (chave própria). Usado na escalada (escalation_router),
+        # espelhando app.py::_call_strong. Só constrói com ANTHROPIC_API_KEY.
+        "anthropic": lambda: AnthropicClient(),
         # Claude Code local (L3). Só entra na cadeia se listado explicitamente.
         "claudecode": lambda: ClaudeCodeClient(),
     }

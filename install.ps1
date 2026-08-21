@@ -5,7 +5,8 @@
 .DESCRIPTION
     Instala/verifica tudo o que o AEye precisa no PC (Windows 10/11):
       * Python 3.10–3.12 (se faltar) + ambiente virtual + dependências pip
-      * Ollama + modelo glm-ocr (OCR de manuscrito via Vulkan na Vega 8)
+      * Ollama + modelo aipib/LightOnOCR-2-1B:Q8_0 (OCR local via Vulkan na Vega 8)
+      * Ollama + modelo jewelzufo/MiniCPM5-1B:latest (orquestrador local de ações)
       * [opcional] Node.js + computer-control-mcp-server (controle por voz)
       * [opcional] Claude Code (toggle "modelo forte")
       * Cria o arquivo .env a partir do .env.example
@@ -30,7 +31,7 @@
 .PARAMETER InstallClaudeCode
     Instala o Claude Code (usa a assinatura do usuário; sem API key).
 .PARAMETER IncludeDeepSeek
-    Baixa também o deepseek-ocr (~6,7GB) além do glm-ocr (~2,2GB).
+    Baixa também o deepseek-ocr (~6,7GB) além do LightOnOCR (~1GB).
 .PARAMETER SkipFirewall
     Não tenta liberar a porta 8080 no firewall.
 .PARAMETER Launch
@@ -153,7 +154,7 @@ if (-not $SkipPython) {
 }
 
 # --------------------------------------------------------------------------- #
-# 2) Ollama + modelos (Vulkan na Vega 8)
+# 2) Ollama + modelos (dois servidores: 11434 orquestrador, 11435 OCR/VLM)
 # --------------------------------------------------------------------------- #
 function Find-Ollama {
     $c = Get-Command ollama.exe -ErrorAction SilentlyContinue
@@ -190,24 +191,43 @@ if (-not $SkipOllama) {
         Write-OK "Ollama já instalado"
     }
 
-    if (-not (Test-PortOpen 11434)) {
-        Write-Host "    Iniciando o Ollama (aguarde)..."
-        Start-Process -FilePath $OllamaExe -ArgumentList 'app' | Out-Null
+    # Garante um servidor Ollama de pé na porta dada (sobe em background se preciso).
+    function Ensure-Ollama {
+        param([int]$Port)
+        if (Test-PortOpen $Port) {
+            Write-OK "Ollama de pé na porta $Port"
+            return
+        }
+        Write-Host "    Iniciando Ollama na porta $Port (background)..."
+        $env:OLLAMA_HOST = "127.0.0.1:$Port"
+        Start-Process -FilePath $OllamaExe -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
         $ok = $false
         for ($i = 0; $i -lt 60; $i++) {
-            Start-Sleep -Seconds 1
-            if (Test-PortOpen 11434) { $ok = $true; break }
+            Start-Sleep -Milliseconds 500
+            if (Test-PortOpen $Port) { $ok = $true; break }
         }
-        if (-not $ok) { Write-Warn "Ollama não respondeu na porta 11434 (abra o app do Ollama manualmente)." }
-        else { Write-OK "Ollama no ar (http://localhost:11434)" }
-    } else {
-        Write-OK "Ollama já está no ar"
+        if ($ok) { Write-OK "Ollama na porta $Port está de pé." }
+        else { Write-Warn "Ollama na porta $Port não respondeu a tempo (ainda pode estar iniciando)." }
     }
 
-    Write-Step "Baixando o modelo de OCR local: glm-ocr (~2,2GB)"
-    & $OllamaExe pull glm-ocr
-    if ($LASTEXITCODE -ne 0) { Write-Warn "Falha ao baixar glm-ocr. Tente: ollama pull glm-ocr" }
-    else { Write-OK "glm-ocr pronto (use 'ollama ps' para confirmar a GPU Vulkan)" }
+    # Baixa o modelo no servidor correto; só confirma "pronto" se o pull sucedeu.
+    function Pull-Model {
+        param([string]$Name, [string]$Size, [string]$Desc, [int]$Port)
+        Write-Step "Baixando o modelo $Desc: $Name ($Size) na porta $Port"
+        $env:OLLAMA_HOST = "127.0.0.1:$Port"
+        & $OllamaExe pull $Name
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Falha ao baixar $Name na porta $Port. Tente: \$env:OLLAMA_HOST='127.0.0.1:$Port'; ollama pull $Name"
+        } else {
+            Write-OK "$Name pronto (porta $Port)"
+        }
+    }
+
+    Ensure-Ollama -Port 11434   # orquestrador (MiniCPM)
+    Ensure-Ollama -Port 11435   # OCR/VLM (LightOnOCR)
+
+    Pull-Model -Name 'aipib/LightOnOCR-2-1B:Q8_0' -Size '~1GB' -Desc 'de OCR local' -Port 11435
+    Pull-Model -Name 'jewelzufo/MiniCPM5-1B:latest' -Size '~1GB' -Desc 'orquestrador local de ações' -Port 11434
 
     if ($IncludeDeepSeek) {
         Write-Step "Baixando deepseek-ocr (~6,7GB, opcional)"

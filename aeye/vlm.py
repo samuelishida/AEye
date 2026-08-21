@@ -1,7 +1,7 @@
 """Modelo de visão local via Ollama (backend Vulkan na Vega 8 ou CPU).
 
-Padrão: ``glm-ocr`` (GLM-4.5V-OCR, ~2,2GB) — melhor equilíbrio precisão/tamanho
-para OCR. Alternativa: ``deepseek-ocr`` (6,7GB, mais preciso em documentos).
+Padrão: ``aipib/LightOnOCR-2-1B:Q8_0`` — modelo OCR principal (~1GB Q8).
+Alternativa: ``deepseek-ocr`` (6,7GB, mais preciso em documentos).
 """
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ class VLMUnavailable(Exception):
 
 class OllamaVLM:
     def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
-        self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
-        self.model = model or os.getenv("OLLAMA_MODEL", "glm-ocr")
+        self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://localhost:11435")).rstrip("/")
+        self.model = model or os.getenv("OLLAMA_MODEL", "aipib/LightOnOCR-2-1B:Q8_0")
         self._cache_until: float = 0.0
         self._cache_value: tuple[bool, bool] = (False, False)
 

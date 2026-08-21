@@ -64,6 +64,30 @@ def test_chain_pode_incluir_claude_code(monkeypatch: pytest.MonkeyPatch) -> None
     assert isinstance(chain[1][1], ClaudeCodeClient)
 
 
+def test_chain_inclui_minicpm_com_modelo_configurado(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Orquestrador: minicpm é OpenAICompatClient com o modelo de AEYE_ORCH_MODEL."""
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "c")
+    monkeypatch.setenv("AEYE_ORCH_MODEL", "jewelzufo/MiniCPM5-1B:latest")
+    chain = build_chain("minicpm,gemini,cerebras")
+    names = [n for n, _ in chain]
+    assert names == ["minicpm", "gemini", "cerebras"]
+    client = chain[0][1]
+    assert isinstance(client, OpenAICompatClient)
+    assert client.model == "jewelzufo/MiniCPM5-1B:latest"
+    # MiniCPM (Ollama) usa api_key="ollama" e NÃO exige chave externa:
+    assert client.api_key == "ollama"
+
+
+def test_minicpm_nao_exige_chave(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sem GEMINI/CEREBRAS mas com Ollama no ar, só minicpm constrói."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    chain = build_chain("minicpm")
+    assert [n for n, _ in chain] == ["minicpm"]
+    assert isinstance(chain[0][1], OpenAICompatClient)
+
+
 
 def test_build_chain_warns_when_pulando_sem_chave(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.CaptureFixture[str]

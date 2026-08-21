@@ -8,6 +8,7 @@ const statusEl = $("status");
 let mode = "texto";
 let selectedImage = null;
 let pendingAction = null;
+let pendingCommand = null;
 
 /* ---------- estado do modo ---------- */
 document.querySelectorAll(".seg").forEach((btn) => {
@@ -239,8 +240,13 @@ async function runChatFlow(message) {
 }
 
 async function runActFlow(command) {
-  const data = await postJSON("/api/act", { command, approved: false });
+  const data = await postJSON("/api/act", {
+    command,
+    approved: false,
+    strong: $("actStrongToggle").checked,
+  });
   pendingAction = data.action;
+  pendingCommand = command;
   $("approvalText").textContent = _approvalText(pendingAction);
   $("approval").hidden = false;
   $("approveBtn").focus();
@@ -326,7 +332,7 @@ async function _runAct(command) {
 }
 
 $("approveBtn").addEventListener("click", async () => {
-  const command = $("actionInput").value.trim();
+  const command = pendingCommand || $("actionInput").value.trim();
   $("approveBtn").disabled = true;
   statusEl.textContent = "Executando...";
   try {
@@ -344,6 +350,7 @@ $("approveBtn").addEventListener("click", async () => {
     }
     $("approval").hidden = true;
     pendingAction = null;
+    pendingCommand = null;
   } catch (err) {
     announce("Erro ao executar a ação: " + err.message);
   } finally {
@@ -353,6 +360,7 @@ $("approveBtn").addEventListener("click", async () => {
 
 $("rejectBtn").addEventListener("click", () => {
   pendingAction = null;
+  pendingCommand = null;
   $("approval").hidden = true;
   announce("Ação cancelada pelo usuário.");
   postJSON("/api/cancel", {}).catch(() => {});

@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from aeye import killswitch, ocr, vlm
 from aeye.agent import ActionError, MCPToolExecutor, ToolExecutor, parse_command, validate_action
 from aeye.clipboard_watcher import ClipboardWatcher
-from aeye.llm import LLMError, key_ok
+from aeye.llm import ClaudeCodeClient, LLMError, build_chain, key_ok
 from aeye.router import Router, RouterExhausted
 from aeye.tts import TTSEngine
 
@@ -100,6 +100,8 @@ PROMPT_EXTRACT = "Extraia TODO o texto exatamente como está, preservando linhas
 # Estado global
 # --------------------------------------------------------------------------- #
 router: Router | None = None
+orchestration_router: Router | None = None
+escalation_router: Router | None = None
 vlm_local: vlm.OllamaVLM
 tts: TTSEngine
 executor: ToolExecutor | None = None
@@ -114,10 +116,40 @@ def build_executor() -> ToolExecutor | None:
     return None
 
 
+def build_orchestration_router() -> Router | None:
+    """MiniCPM primeiro no fluxo de ação; escala p/ API gratuita se offline.
+
+    Chain default: `minicpm,gemini,cerebras` (via AEYE_ORCH_CHAIN). A cadeia
+    global (`router`) governa /api/chat e OCR e NÃO é alterada.
+    """
+    chain_env = os.getenv("AEYE_ORCH_CHAIN", "minicpm,gemini,cerebras")
+    try:
+        return Router(chain=build_chain(chain_env))
+    except LLMError:
+        return None
+
+
+def build_escalation_router() -> Router | None:
+    """Modelo forte da escalada: espelha _call_strong (Claude → API Anthropic → grátis).
+
+    Só inclui cada provedor se disponível; o Router escala entre os que existem.
+    """
+    names: list[str] = []
+    if ClaudeCodeClient.available():
+        names.append("claudecode")
+    if key_ok(os.getenv("ANTHROPIC_API_KEY")):
+        names.append("anthropic")
+    names.extend(["gemini", "cerebras"])
+    try:
+        return Router(chain=build_chain(",".join(names)))
+    except LLMError:
+        return None
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Inicialização: cadeia de LLMs, VLM local, TTS, executor MCP e watcher."""
-    global router, vlm_local, tts, executor
+    global router, orchestration_router, escalation_router, vlm_local, tts, executor
     _register_heif()
     try:
         router = Router()
@@ -125,6 +157,8 @@ async def lifespan(_app: FastAPI):
         # Sem chaves configuradas o servidor ainda sobe; /api/chat devolve erro claro.
         router = None  # type: ignore[assignment]
         print(f"[AVISO] {exc}")
+    orchestration_router = build_orchestration_router()
+    escalation_router = build_escalation_router()
     vlm_local = vlm.OllamaVLM()
     tts = TTSEngine()
     executor = build_executor()
@@ -225,7 +259,7 @@ def pipeline_image(image_bytes: bytes, mode: str, instruction: str, strong: bool
                     raise HTTPException(
                         status_code=503,
                         detail="Ollama fora do ar e sem fallback de visão configurado. "
-                        "Rode: ollama pull glm-ocr",
+                        f"Rode: ollama pull {vlm_local.model}",
                     )
             final_text = raw_text
             provider = source
@@ -389,17 +423,20 @@ async def api_act(payload: dict[str, Any]) -> dict[str, Any]:
             detail="Controle do PC não habilitado. Configure AEYE_MCP=1 no .env e instale o "
             "computer-control-mcp-server (veja README).",
         )
-    if router is None:
+    if orchestration_router is None:
         raise HTTPException(
             status_code=503, detail="Nenhum provedor de LLM configurado (.env) para interpretar o comando."
         )
 
     approved = payload.get("approved") is True
+    force_strong = payload.get("strong") is True
 
     if not approved:
         try:
             # parse (chamada de LLM, bloqueante) fora do event loop
-            action = await run_in_threadpool(parse_command, router, command)
+            action = await run_in_threadpool(
+                parse_command, orchestration_router, command, "", escalation_router, force_strong
+            )
         except ActionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         # Sempre exige aprovação explícita na UI antes de executar.

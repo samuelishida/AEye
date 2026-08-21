@@ -10,12 +10,17 @@ whitelist de ferramentas e kill switch (segurar Esc cancela a ação em curso).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any
 
 from .llm import LLMError
 from .router import Router, RouterExhausted
+
+# Cap de tokens do caminho JSON do orquestrador/escalada (thinking models 1B
+# precisam de orçamento para o bloco thinking; _run usa max_tokens or 1024).
+_ORCH_MAX_TOKENS = int(os.getenv("AEYE_ORCH_MAX_TOKENS", "2048"))
 
 # Ferramentas expostas pelo computer-control-mcp-server (wshobson/agents).
 TOOL_WHITELIST = {
@@ -104,24 +109,17 @@ def _system_prompt() -> str:
         "Use o contexto da tela (árvore de acessibilidade) quando fornecido para "
         "descrever o elemento alvo (element_description, x, y quando houver). "
         "Se o comando não pedir nenhuma ação de computador, use "
-        '{"tool": "none", "params": {}, "rationale": "..."}.'
+        '{"tool": "none", "params": {}, "rationale": "..."}. '
+        "Se você NÃO consegue executar com as ferramentas disponíveis, se o usuário "
+        'pedir explicitamente o modelo forte, ou se a tarefa exigir escrever ou '
+        'executar código além da sua capacidade, responda exatamente: '
+        '{"tool": "escalate", "params": {}, "rationale": "<motivo>", '
+        '"escalate_reason": "<por que é necessário escalar>"}.'
     )
 
 
-def parse_command(router: Router, command: str, screen_context: str = "") -> dict[str, Any]:
-    """Converte o comando em uma ação estruturada usando a cadeia gratuita."""
-    user = f"Comando: {command}"
-    if screen_context:
-        user += f"\n\nContexto da tela (árvore de acessibilidade):\n{screen_context[:4000]}"
-    try:
-        action = router.run(
-            [{"role": "system", "content": _system_prompt()}, {"role": "user", "content": user}],
-            json_mode=True,
-            temperature=0.0,
-        )[0]
-    except (RouterExhausted, LLMError) as exc:
-        raise ActionError(f"Não consegui interpretar o comando: {exc}") from exc
-
+def _normalize_action(action: Any) -> dict[str, Any]:
+    """Valida e normaliza uma ação {tool, params, rationale} (fonte única)."""
     if not isinstance(action, dict):
         raise ActionError("Resposta do agente não é um objeto JSON válido")
 
@@ -135,6 +133,79 @@ def parse_command(router: Router, command: str, screen_context: str = "") -> dic
     if not isinstance(params, dict):
         raise ActionError("Parâmetros da ação inválidos.")
     return {"tool": tool, "params": params, "rationale": str(action.get("rationale", ""))}
+
+
+def _is_escalation(action: Any) -> bool:
+    return isinstance(action, dict) and str(action.get("tool", "")).strip().lower() == "escalate"
+
+
+def _run(target: Router, messages: list[dict[str, str]]) -> tuple[Any, str, bool]:
+    """Executa a cadeia em json_mode e devolve (resposta, provedor, escalou).
+
+    Aplica o cap de tokens (thinking models) e converte falhas de
+    disponibilidade em ActionError. O provedor é reportado para observabilidade
+    da escalada.
+    """
+    try:
+        result, provider, escalated = target.run(
+            messages, json_mode=True, temperature=0.0, max_tokens=_ORCH_MAX_TOKENS
+        )
+        return result, provider, escalated
+    except RouterExhausted:
+        raise ActionError("Não consegui interpretar o comando (cadeia indisponível).")
+    except LLMError as exc:
+        raise ActionError(f"Não consegui interpretar o comando: {exc}") from exc
+
+
+def parse_command(
+    router: Router,
+    command: str,
+    screen_context: str = "",
+    escalation_router: Router | None = None,
+    force_strong: bool = False,
+) -> dict[str, Any]:
+    """Converte o comando em uma ação estruturada {tool, params}.
+
+    Orquestra na cadeia (MiniCPM → API). Se o orquestrador emitir o sinal
+    `tool: "escalate"` (incapacidade, pedido de modelo forte, ou código além da
+    capacidade), ou se `force_strong` for True, re-executa com o
+    `escalation_router` (Claude Code → API Anthropic → cadeia gratuita).
+
+    - `escalation_router` None + sinal/force_strong → ActionError (modelo forte
+      indisponível).
+    - O escalador NÃO pode re-escalar: `_normalize_action` rejeita `"escalate"`,
+      e aqui detectamos o sinal do escalador com uma mensagem clara.
+    """
+
+    user = f"Comando: {command}"
+    if screen_context:
+        user += f"\n\nContexto da tela (árvore de acessibilidade):\n{screen_context[:4000]}"
+    messages = [
+        {"role": "system", "content": _system_prompt()},
+        {"role": "user", "content": user},
+    ]
+
+    def _resolve(target: Router, *, escalated: bool) -> dict[str, Any]:
+        raw, provider, _was_escalated = _run(target, messages)
+        if _is_escalation(raw):
+            logging.warning("Modelo forte (%s) re-solicitou escalada — comando não resolvido", provider)
+            raise ActionError("O modelo forte também não conseguiu resolver o comando (re-solicitou escalada).")
+        if escalated:
+            logging.warning("Escalada para modelo forte: provedor '%s'", provider)
+        return _normalize_action(raw)
+
+    if force_strong:
+        if escalation_router is None:
+            raise ActionError("Modelo forte indisponível (nenhum escalador configurado).")
+        return _resolve(escalation_router, escalated=True)
+
+    action, _provider, _was_escalated = _run(router, messages)
+    if _is_escalation(action):
+        if escalation_router is None:
+            raise ActionError("O agente solicitou o modelo forte, mas ele está indisponível.")
+        return _resolve(escalation_router, escalated=True)
+
+    return _normalize_action(action)
 
 
 class ToolExecutor(ABC):

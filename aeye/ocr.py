@@ -54,7 +54,7 @@ def extract_text(img: bytes | bytearray | str | Image.Image) -> str:
 def needs_vlm(text: str) -> bool:
     """Heurística: pouco/nenhum texto detectado -> provável manuscrito/imagem complexa.
 
-    Nesse caso a camada L1 (Ollama + glm-ocr) deve assumir.
+    Nesse caso a camada L1 (Ollama + LightOnOCR) deve assumir.
     """
     stripped = re.sub(r"\s+", "", text or "")
     if not stripped:
