@@ -48,6 +48,10 @@ function Start-OllamaServer {
         return
     }
     Write-Host "Iniciando Ollama na porta $Port (background)..." -ForegroundColor Cyan
+    # Divergência intencional vs run.sh: este script NÃO exporta
+    # OLLAMA_FLASH_ATTENTION=0 / OLLAMA_KV_CACHE_K_TYPE (nem lê as portas
+    # do .env) — o bug de Flash Attention em Vulkan/iGPU não ocorre no alvo
+    # Windows (dGPU AMD). Mantenha em parity se um dia rodar em iGPU Linux.
     $env:OLLAMA_HOST = "127.0.0.1:$Port"
     Start-Process -FilePath $OllamaExe.Source -ArgumentList "serve" -WindowStyle Hidden
     for ($i = 0; $i -lt 30; $i++) {

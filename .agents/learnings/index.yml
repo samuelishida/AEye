@@ -1,0 +1,7 @@
+# Índice de learnings (AEye)
+# Reuse: lista de arquivos/domínios que este learning se aplica.
+
+- file: .agents/learnings/aeye-robustness.md
+  tags: [aeye, fastapi, logging, tts, plan-execution]
+  Reuse: [app.py, aeye/tts.py, web/app.js, .plans/*]
+igpu-vulkan-flash-attention: iGPU Intel Vulkan OCR corrupted output -> OLLAMA_FLASH_ATTENTION=0 + K-only q8_0 KV cache; see .agents/learnings/igpu-vulkan-flash-attention.md

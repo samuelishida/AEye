@@ -6,6 +6,7 @@ __pycache__/
 
 # Segredos e configuração local
 .env
+LOCAL.md
 
 # Sistema
 Thumbs.db
