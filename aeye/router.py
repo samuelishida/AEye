@@ -161,5 +161,3 @@ class Router:
             except (ValueError, json.JSONDecodeError) as exc:
                 if attempt >= retries:
                     raise LLMError(f"{client.name} devolveu JSON inválido: {exc}") from exc
-        # The for-loop always raises on the final attempt when no parse succeeds;
-        # this loop body is therefore exhaustive and returns only on success.

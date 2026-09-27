@@ -5,6 +5,7 @@
 - `extract_json` brace-matching complexity — tests cover pathological cases.
 - `killswitch.py` non-Windows no-op — acceptable; UI cancel still works.
 - Third-party imports instantiated lazily with availability guards — correct vs current docs.
+- Local re-import inside `_call_strong` (`from aeye.llm import ClaudeCodeClient, ...`) — load-bearing for testability: tests monkeypatch `aeye.llm.ClaudeCodeClient`, and the local import re-reads the patched attribute at call time. Removing it breaks `test_strong_claude_code_sucesso`.
 
 ## Do flag as issues
 - convert()/save() outside try block → fold into same except.

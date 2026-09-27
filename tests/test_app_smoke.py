@@ -1,6 +1,7 @@
 """Smoke test do servidor FastAPI (sem chaves reais, tudo mockado por ausência)."""
 from __future__ import annotations
 
+import logging
 import os
 
 import pytest
@@ -57,6 +58,51 @@ def test_chat_sem_chaves_503(client) -> None:
 def test_act_sem_mcp_503(client) -> None:
     r = client.post("/api/act", json={"command": "abre o word", "approved": False})
     assert r.status_code == 503
+
+
+def test_clipboard_poll_invalid_fallback(monkeypatch) -> None:
+      """AEYE_CLIPBOARD_POLL inválido cai no default 0.5; válido é respeitado."""
+      from app import _clipboard_poll_seconds
+
+      monkeypatch.setenv("AEYE_CLIPBOARD_POLL", "not-a-number")
+      assert _clipboard_poll_seconds() == 0.5
+      monkeypatch.setenv("AEYE_CLIPBOARD_POLL", "1.5")
+      assert _clipboard_poll_seconds() == 1.5
+
+
+def test_clipboard_poll_zero_and_negative(monkeypatch) -> None:
+      """0/negativo caem no default 0.5 (evita busy-loop do watcher)."""
+      from app import _clipboard_poll_seconds
+
+      monkeypatch.setenv("AEYE_CLIPBOARD_POLL", "0")
+      assert _clipboard_poll_seconds() == 0.5
+      monkeypatch.setenv("AEYE_CLIPBOARD_POLL", "-2")
+      assert _clipboard_poll_seconds() == 0.5
+      monkeypatch.setenv("AEYE_CLIPBOARD_POLL", "0.1")
+      assert _clipboard_poll_seconds() == 0.1
+
+
+def test_read_status_shape(client, monkeypatch) -> None:
+    """GET /api/read/status devolve {speaking, current} (TTS mockado)."""
+
+    class _FakeTTS:
+        def status(self):
+            return ("texto falando", True)
+
+    monkeypatch.setattr("app.tts", _FakeTTS())
+    r = client.get("/api/read/status")
+    assert r.status_code == 200
+    assert r.json() == {"speaking": True, "current": "texto falando"}
+
+
+def test_request_id_filter_injects_field() -> None:
+    """O _RequestIdFilter anexa o request_id atual ao LogRecord."""
+    from app import _RequestIdFilter, _request_id_var
+
+    _request_id_var.set("abc123")
+    rec = logging.LogRecord("aeye.test", logging.INFO, __file__, 1, "hi", None, None)
+    assert _RequestIdFilter().filter(rec) is True
+    assert rec.request_id == "abc123"
 
 
 # --------------------------------------------------------------------------- #

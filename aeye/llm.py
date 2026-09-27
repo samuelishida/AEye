@@ -191,20 +191,7 @@ class OpenAICompatClient(LLMClient):
         client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=60)
         try:
             if json_mode:
-                try:
-                    kwargs["response_format"] = {"type": "json_object"}
-                    resp = client.chat.completions.create(
-                        model=self.model, messages=list(messages), temperature=temperature, **kwargs
-                    )
-                except Exception as json_exc:
-                    # Alguns provedores não aceitam response_format: tenta de novo sem.
-                    kwargs.pop("response_format", None)
-                    try:
-                        resp = client.chat.completions.create(
-                            model=self.model, messages=list(messages), temperature=temperature, **kwargs
-                        )
-                    except Exception as exc:
-                        raise LLMError(f"{self.name} (json) falhou: {json_exc}; sem json_object: {exc}") from exc
+                resp = self._create_json(client, messages, temperature, kwargs)
             else:
                 resp = client.chat.completions.create(
                     model=self.model, messages=list(messages), temperature=temperature, **kwargs
@@ -220,6 +207,22 @@ class OpenAICompatClient(LLMClient):
         if not content.strip():
             raise LLMError(f"{self.name} devolveu resposta vazia")
         return content
+
+    def _create_json(self, client: Any, messages, temperature: float, kwargs: dict[str, Any]) -> Any:
+        """Chama o provedor em json_mode; alguns não aceitam response_format → tenta sem."""
+        try:
+            kwargs["response_format"] = {"type": "json_object"}
+            return client.chat.completions.create(
+                model=self.model, messages=list(messages), temperature=temperature, **kwargs
+            )
+        except Exception as json_exc:
+            kwargs.pop("response_format", None)
+            try:
+                return client.chat.completions.create(
+                    model=self.model, messages=list(messages), temperature=temperature, **kwargs
+                )
+            except Exception as exc:
+                raise LLMError(f"{self.name} (json) falhou: {json_exc}; sem json_object: {exc}") from exc
 
 
 # --------------------------------------------------------------------------- #

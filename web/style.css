@@ -197,3 +197,26 @@ footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 8p
   70% { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
   100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
 }
+
+/* spinner de estado durante processamento (OCR / interpretação / execução) */
+button.loading {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+}
+button.loading::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 3px solid rgba(4, 18, 31, 0.3);
+  border-top-color: #04121f;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

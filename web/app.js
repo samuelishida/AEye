@@ -274,15 +274,16 @@ function _abortMessage() {
   return "Ainda processando... a resposta demorou demais. Tente de novo (ou use uma imagem menor).";
 }
 
-$("processBtn").addEventListener("click", () => _processFromInputs(false));
+$("processBtn").addEventListener("click", () => _processFromInputs());
 
-async function _processFromInputs(isRetry) {
+async function _processFromInputs() {
   const instruction = $("promptInput").value.trim();
-  if (!isRetry && !selectedImage && !instruction) {
+  if (!selectedImage && !instruction) {
     statusEl.textContent = "Envie uma imagem ou digite uma mensagem.";
     return;
   }
   $("processBtn").disabled = true;
+  $("processBtn").classList.add("loading");
   statusEl.textContent = "Processando...";
   try {
     if (selectedImage) {
@@ -301,14 +302,13 @@ async function _processFromInputs(isRetry) {
       addMsg("assistant", data.text, `via ${data.provider}${data.escalated ? " (fallback)" : ""}`,
         { kind: "chat", message: instruction });
       speak(data.text);
-    } else {
-      statusEl.textContent = "Envie uma imagem ou digite uma mensagem.";
     }
     announce("Processamento concluído. A resposta está no histórico.");
   } catch (err) {
     announce(err.name === "AbortError" ? _abortMessage() : "Erro ao processar: " + err.message);
   } finally {
     $("processBtn").disabled = false;
+    $("processBtn").classList.remove("loading");
   }
 }
 
@@ -320,6 +320,7 @@ $("actBtn").addEventListener("click", () => {
 });
 
 async function _runAct(command) {
+  $("actBtn").classList.add("loading");
   $("actBtn").disabled = true;
   statusEl.textContent = "Interpretando comando...";
   try {
@@ -328,10 +329,12 @@ async function _runAct(command) {
     announce("Erro ao interpretar o comando: " + err.message);
   } finally {
     $("actBtn").disabled = false;
+    $("actBtn").classList.remove("loading");
   }
 }
 
-$("approveBtn").addEventListener("click", async () => {
+  $("approveBtn").addEventListener("click", async () => {
+  $("approveBtn").classList.add("loading");
   const command = pendingCommand || $("actionInput").value.trim();
   $("approveBtn").disabled = true;
   statusEl.textContent = "Executando...";
@@ -355,6 +358,7 @@ $("approveBtn").addEventListener("click", async () => {
     announce("Erro ao executar a ação: " + err.message);
   } finally {
     $("approveBtn").disabled = false;
+    $("approveBtn").classList.remove("loading");
   }
 });
 

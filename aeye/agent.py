@@ -80,19 +80,7 @@ def validate_action(action: Any) -> dict[str, Any]:
     Garante que só ferramentas da whitelist com parâmetros em formato de dicionário
     cheguem ao executor. Levanta ActionError se a ação for inválida/perigosa.
     """
-    if not isinstance(action, dict):
-        raise ActionError("Ação aprovada ausente ou inválida.")
-    tool = str(action.get("tool", "")).strip()
-    if tool not in TOOL_WHITELIST:
-        raise ActionError(f"Ferramenta não permitida: {tool}")
-    params = action.get("params")
-    if not isinstance(params, dict):
-        raise ActionError("Parâmetros da ação inválidos.")
-    return {
-        "tool": tool,
-        "params": params,
-        "rationale": str(action.get("rationale", "")),
-    }
+    return _normalize_action(action)
 
 
 def _system_prompt() -> str:

@@ -5,17 +5,19 @@ Acesse pelo celular na mesma rede Wi-Fi:  http://<IP-DO-PC>:8080
 """
 from __future__ import annotations
 
+import contextvars
 import hmac
 import logging
 import os
 import socket
 import threading
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,8 +31,27 @@ from aeye.tts import TTSEngine
 
 load_dotenv()
 
-# Make application-level warnings surface to stderr when run directly.
-logging.basicConfig(level=logging.WARNING)
+# Logging estruturado: cada requisição recebe um request_id (via middleware) e o
+# formato abaixo o inclui. O nível é configurável por AEYE_LOG_LEVEL.
+_request_id_var = contextvars.ContextVar("aeye_request_id", default="")
+
+
+class _RequestIdFilter(logging.Filter):
+    """Anexa o request_id atual (ou vazio) a cada LogRecord."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_var.get()
+        return True
+
+
+_log_level = getattr(logging, os.getenv("AEYE_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
+logging.basicConfig(
+    level=_log_level,
+    format="AEYE [%(request_id)s] %(levelname)s %(name)s: %(message)s",
+)
+_root_logger = logging.getLogger()
+for _h in _root_logger.handlers:
+    _h.addFilter(_RequestIdFilter())
 
 MAX_UPLOAD = 20 * 1024 * 1024  # 20MB
 
@@ -156,7 +177,7 @@ async def lifespan(_app: FastAPI):
     except LLMError as exc:
         # Sem chaves configuradas o servidor ainda sobe; /api/chat devolve erro claro.
         router = None  # type: ignore[assignment]
-        print(f"[AVISO] {exc}")
+        logging.warning("Nenhum provedor de LLM configurado: %s", exc)
     orchestration_router = build_orchestration_router()
     escalation_router = build_escalation_router()
     vlm_local = vlm.OllamaVLM()
@@ -165,16 +186,30 @@ async def lifespan(_app: FastAPI):
     killswitch.start_escape_watcher(cancel_event)
 
     if os.getenv("AEYE_CLIPBOARD", "1").lower() in ("1", "true", "yes"):
-        watcher = ClipboardWatcher(on_image=lambda data, _h: _handle_clipboard_image(data))
+        watcher = ClipboardWatcher(
+            on_image=lambda data, _h: _handle_clipboard_image(data),
+            poll_seconds=_clipboard_poll_seconds(),
+        )
         watcher.start()
 
-    print(f"AEye rodando em http://{_lan_ip()}:8080  (no PC) e http://localhost:8080")
+    logging.info("AEye rodando em http://%s:8080 (no PC) e http://localhost:8080", _lan_ip())
     if router is not None:
-        print(f"Cadeia de LLMs: {', '.join(router.names)}")
+        logging.info("Cadeia de LLMs: %s", ", ".join(router.names))
+    yield
+
+
+def _clipboard_poll_seconds() -> float:
+    """Intervalo (s) entre verificações do watcher de clipboard.
+
+    Lê AEYE_CLIPBOARD_POLL; valor inválido/não-numérico cai no default 0.5.
+    Piso de 0.1s evita busy-loop do watcher com 0 ou valor negativo.
+    """
+    raw = os.getenv("AEYE_CLIPBOARD_POLL", "0.5")
     try:
-        yield
-    finally:
-        pass
+        value = float(raw)
+    except ValueError:
+        return 0.5
+    return value if value >= 0.1 else 0.5
 
 
 def _lan_ip() -> str:
@@ -339,15 +374,27 @@ def _handle_clipboard_image(data: bytes) -> None:
                 capture_output=True,
                 timeout=15,
             )
-        print(f"[clipboard] Captura processada via {result['provider']}: {len(result['text'])} chars")
+        logging.info(
+            "[clipboard] Captura processada via %s: %d chars", result["provider"], len(result["text"])
+        )
     except Exception as exc:  # noqa: BLE001
-        print(f"[clipboard] Erro ao processar captura: {exc}")
+        logging.warning("[clipboard] Erro ao processar captura: %s", exc)
 
 
 # --------------------------------------------------------------------------- #
 # Aplicação
 # --------------------------------------------------------------------------- #
 app = FastAPI(title="AEye", version="0.1.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _request_id_middleware(request: Request, call_next):
+    """Gera um request_id por requisição e o disponibiliza via contextvar."""
+    _request_id_var.set(uuid.uuid4().hex[:8])
+    try:
+        return await call_next(request)
+    finally:
+        _request_id_var.set("")
 
 # --------------------------------------------------------------------------- #
 # Endpoints
@@ -362,7 +409,7 @@ def _health() -> dict[str, Any]:
     return {
         "ok": True,
         "chain": router.names if router is not None else [],
-        "ollama": vlm_local.available() if "vlm_local" in globals() else False,
+        "ollama": vlm_local.available(),
         "mcp": executor is not None,
     }
 
@@ -470,6 +517,13 @@ async def api_read(payload: dict[str, str]) -> dict[str, bool]:
     if text:
         tts.speak(text)
     return {"ok": True}
+
+
+@app.get("/api/read/status", dependencies=[Depends(require_pin)])
+async def api_read_status() -> dict[str, Any]:
+    """Estado do TTS: se está falando e o texto atual (feedback para a UI)."""
+    current, speaking = tts.status()
+    return {"speaking": speaking, "current": current}
 
 
 # --------------------------------------------------------------------------- #
